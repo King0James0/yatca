@@ -34,7 +34,9 @@ This repo is structured for the [a0-plugins](https://github.com/agent0ai/a0-plug
 
 - **Text messages** -- forwarded to Agent Zero, responses streamed back
 - **Photos** -- sent as file attachments for vision analysis
-- **Documents/files** -- forwarded as attachments with configurable size limit
+- **Voice/audio** -- transcribed to text via the built-in Whisper STT plugin before reaching the agent
+- **Video** -- audio transcribed + frames sampled evenly across the clip for vision (frame count scales with length, capped by the model's `max_embeds`)
+- **Documents/files** -- PDF/DOCX/TXT text extracted inline; all files forwarded with configurable size limit
 - **Rich Markdown rendering** -- tables (as monospace), code blocks, LaTeX stripping
 - **Long message splitting** -- auto-splits responses exceeding Telegram's 4096 char limit
 - **Multi-level send fallback** -- HTML -> plain text -> truncated
@@ -150,9 +152,12 @@ All settings are configured via the WebUI. Per-bot options:
 | `group_mode` | `mention` | `mention`, `all`, or `off` |
 | `default_project` | -- | Default A0 project name |
 | `user_projects` | `{}` | Map user_id to project name |
-| `max_file_size_mb` | `20` | Max attachment size in MB |
+| `max_file_size_mb` | `20` | Max attachment size in MB (note: Telegram's cloud Bot API caps downloads at 20 MB regardless) |
 | `a0_timeout` | `300` | Request timeout in seconds |
 | `attachment_max_age_hours` | `0` | Auto-cleanup age (0 = keep forever) |
+| `enrich_media` | `true` | Transcribe voice/audio + extract video frames & document text before sending to the agent |
+| `video_frame_interval_s` | `5` | Sample one video frame per this many seconds (fewer seconds = more frames); total capped by the model's `max_embeds` |
+| `queue_messages` | `true` | When the agent is busy, queue new messages and run them in order instead of interrupting; `/stop` cancels the current task |
 | `notify_messages` | `false` | WebUI notifications for messages |
 | `welcome_enabled` | `false` | Welcome message in groups |
 | `welcome_message` | -- | Welcome template (`{name}` placeholder) |

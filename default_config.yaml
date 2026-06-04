@@ -17,4 +17,7 @@ bots: []
 #   max_file_size_mb: 20         # Max file size for attachments in MB
 #   a0_timeout: 300              # Request timeout in seconds for A0 API
 #   notify_messages: false       # Show a WebUI notification for each incoming Telegram message
+#   enrich_media: true           # Transcribe voice/audio + extract video frames & document text before sending to the agent (reuses the built-in Whisper STT plugin)
+#   video_frame_interval_s: 5    # Sample one video frame per this many seconds. More = denser sampling. Total frames are capped by the chat model's max_embeds.
+#   queue_messages: true         # When the agent is busy, queue new messages and run them in order instead of interrupting it. Send /stop to cancel the current task and jump ahead.
 #   agent_instructions: ""       # Extra instructions for the agent in Telegram chats

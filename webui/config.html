@@ -102,6 +102,42 @@
 
                 <div class="field">
                   <div class="field-label">
+                    <div class="field-title">Media Enrichment</div>
+                    <div class="field-description">Transcribe voice/audio and extract video frames &amp; document text before sending to the agent (uses the built-in Whisper STT plugin)</div>
+                  </div>
+                  <div class="field-control">
+                    <label class="toggle">
+                      <input type="checkbox" x-model="bot.enrich_media" />
+                      <span class="toggler"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="field" x-show="bot.enrich_media">
+                  <div class="field-label">
+                    <div class="field-title">Video Frame Interval (s)</div>
+                    <div class="field-description">Sample one video frame per this many seconds. Lower = more frames. The total is capped by the chat model's max_embeds, so it never exceeds your image limit.</div>
+                  </div>
+                  <div class="field-control">
+                    <input type="number" x-model.number="bot.video_frame_interval_s" min="1" max="60" step="1" placeholder="5" />
+                  </div>
+                </div>
+
+                <div class="field">
+                  <div class="field-label">
+                    <div class="field-title">Queue Messages</div>
+                    <div class="field-description">When the agent is busy, queue new messages and run them in order instead of interrupting. Send /stop to cancel the current task and jump ahead.</div>
+                  </div>
+                  <div class="field-control">
+                    <label class="toggle">
+                      <input type="checkbox" x-model="bot.queue_messages" />
+                      <span class="toggler"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <div class="field-label">
                     <div class="field-title">Bot Name</div>
                     <div class="field-description">Unique identifier for this bot configuration</div>
                   </div>

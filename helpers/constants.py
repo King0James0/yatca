@@ -17,3 +17,8 @@ CTX_TG_KEYBOARD = "_yatca_response_keyboard"
 
 # YATCA-specific context data keys
 CTX_TG_PROJECT = "yatca_project"
+
+# Message queue — serialize messages sent while the agent is busy instead of
+# interrupting it. /stop cancels the current turn to jump the queue.
+CTX_TG_QUEUE = "_yatca_pending_queue"
+CTX_TG_PUMP_ACTIVE = "_yatca_pump_active"

@@ -52,6 +52,8 @@ from usr.plugins.yatca.helpers.constants import (
     CTX_TG_ATTACHMENTS,
     CTX_TG_KEYBOARD,
     CTX_TG_PROJECT,
+    CTX_TG_QUEUE,
+    CTX_TG_PUMP_ACTIVE,
 )
 
 
@@ -304,6 +306,7 @@ async def handle_clear(message: TgMessage, bot_name: str, bot_cfg: dict):
         if ctx_id:
             ctx = AgentContext.get(ctx_id)
             if ctx:
+                _clear_queue(ctx)
                 ctx.reset()
                 PrintStyle.info(f"YATCA ({bot_name}): cleared chat for user {user.id}")
 
@@ -386,7 +389,12 @@ async def handle_id(message: TgMessage, bot_name: str, bot_cfg: dict):
 
 
 async def handle_stop(message: TgMessage, bot_name: str, bot_cfg: dict):
-    """Handle /stop command -- pause the agent."""
+    """Handle /stop command -- cancel the current turn cleanly and clear the queue.
+
+    Unlike /clear (which wipes the whole conversation), /stop keeps history; it
+    just kills the in-flight turn so your next message starts a fresh turn. It
+    also drops any queued messages so they don't run after you've changed course.
+    """
     user = message.from_user
     if not user:
         return
@@ -399,18 +407,24 @@ async def handle_stop(message: TgMessage, bot_name: str, bot_cfg: dict):
         return
 
     try:
-        _a0_pause_context(ctx, True)
+        was_running = ctx.is_running()
+        _clear_queue(ctx)
+        ctx.kill_process()  # cancel current turn, keep conversation history
+        typing_stop = ctx.data.pop(CTX_TG_TYPING_STOP, None)
+        if typing_stop:
+            typing_stop.set()
         instance = get_bot(bot_name)
         if instance:
-            await _send_with_temp_bot(
-                instance.bot.token, message.chat.id,
-                "<b>Agent paused.</b>\n\n"
-                "The agent has been stopped mid-work.\n"
-                "Use /resume to continue or /clear to start fresh.",
+            msg = (
+                "<b>Stopped.</b> Cancelled the current task and cleared the queue.\n"
+                "Send your next message to start fresh (history kept; use /clear to wipe it)."
+                if was_running else
+                "Nothing was running. Queue cleared — send a message to start."
             )
-        PrintStyle.info(f"YATCA ({bot_name}): agent paused for user {user.id}")
+            await _send_with_temp_bot(instance.bot.token, message.chat.id, msg)
+        PrintStyle.info(f"YATCA ({bot_name}): agent stopped + queue cleared for user {user.id}")
     except Exception as e:
-        PrintStyle.error(f"YATCA: failed to pause agent: {e}")
+        PrintStyle.error(f"YATCA: failed to stop agent: {e}")
         instance = get_bot(bot_name)
         if instance:
             await _send_with_temp_bot(
@@ -756,6 +770,7 @@ async def _callback_project_set(query: CallbackQuery, bot_name: str, bot_cfg: di
         if old_ctx_id:
             old_ctx = AgentContext.get(old_ctx_id)
             if old_ctx:
+                _clear_queue(old_ctx)
                 old_ctx.reset()
         # Store selected project in state so it persists across context resets
         user_projects = state.setdefault("user_projects", {})
@@ -856,8 +871,6 @@ async def handle_message(message: TgMessage, bot_name: str, bot_cfg: dict):
         )
         return
 
-    context.data[CTX_TG_TYPING_STOP] = typing_stop
-
     # Reply-to tracking for group chats
     reply_to_id = None
     if message.chat.type != "private" and instance.bot_info:
@@ -865,12 +878,22 @@ async def handle_message(message: TgMessage, bot_name: str, bot_cfg: dict):
                 and message.reply_to_message.from_user
                 and message.reply_to_message.from_user.id == instance.bot_info.id):
             reply_to_id = message.message_id
-    context.data[CTX_TG_REPLY_TO] = reply_to_id
 
     text = _extract_message_content(message)
 
     async with _temp_bot(instance.bot.token) as dl_bot:
         attachments = await _download_attachments(dl_bot, message, bot_name=bot_name)
+
+    # Enrich media: transcribe voice/audio + extract video frames/doc text so the
+    # raw files become content the agent's model can actually use.
+    if bot_cfg.get("enrich_media", True):
+        from usr.plugins.yatca.helpers import media_enrich
+        extra_text, attachments = await media_enrich.enrich(attachments, message, bot_cfg)
+        if extra_text:
+            if text and text != "[No text content]":
+                text = f"{text}\n{extra_text}"
+            else:
+                text = extra_text
 
     agent = context.agent0
     user_msg = agent.read_prompt(
@@ -878,8 +901,34 @@ async def handle_message(message: TgMessage, bot_name: str, bot_cfg: dict):
         sender=_format_user(user),
         body=text,
     )
-
     msg_id = str(uuid.uuid4())
+
+    # Queue-or-run: if the agent is already working (or messages are already
+    # queued), do NOT interrupt it. Park this message and let the pump feed it in
+    # as a clean fresh turn once the current one finishes. /stop cancels the
+    # current task if you want to jump ahead. Disable via the queue_messages flag.
+    pending = context.data.setdefault(CTX_TG_QUEUE, [])
+    if bot_cfg.get("queue_messages", True) and (context.is_running() or pending):
+        typing_stop.set()  # the in-flight turn keeps its own typing indicator
+        pending.append({
+            "user_msg": user_msg,
+            "attachments": attachments,
+            "msg_id": msg_id,
+            "reply_to": reply_to_id,
+        })
+        await _send_with_temp_bot(
+            instance.bot.token, message.chat.id,
+            f"⏳ Busy with the current task — queued your message (#{len(pending)} in line). "
+            f"It'll run next. Send /stop to cancel the current task and jump ahead.",
+            parse_mode=None,
+        )
+        _ensure_pump(context, bot_name)
+        return
+
+    # Run now (agent idle): this message owns the typing indicator for its turn.
+    context.data[CTX_TG_TYPING_STOP] = typing_stop
+    context.data[CTX_TG_REPLY_TO] = reply_to_id
+
     mq.log_user_message(context, user_msg, attachments, message_id=msg_id, source=" (yatca)")
     context.communicate(UserMessage(
         message=user_msg,
@@ -900,6 +949,79 @@ async def handle_message(message: TgMessage, bot_name: str, bot_cfg: dict):
             display_time=10,
             group="yatca",
         )
+
+
+# ---------------------------------------------------------------------------
+#  Message queue (serialize messages sent while the agent is busy)
+# ---------------------------------------------------------------------------
+
+def _clear_queue(context: AgentContext):
+    """Drop any queued messages and stop the pump (used by /stop, /clear, project switch)."""
+    context.data[CTX_TG_QUEUE] = []
+    context.data[CTX_TG_PUMP_ACTIVE] = False
+
+
+def _ensure_pump(context: AgentContext, bot_name: str):
+    """Start the drain pump for this context if one isn't already running."""
+    if context.data.get(CTX_TG_PUMP_ACTIVE):
+        return
+    context.data[CTX_TG_PUMP_ACTIVE] = True
+    try:
+        import asyncio
+        asyncio.get_running_loop().create_task(_pump(context, bot_name))
+    except RuntimeError:
+        # No running loop (shouldn't happen inside an aiogram handler) — unset flag.
+        context.data[CTX_TG_PUMP_ACTIVE] = False
+
+
+async def _pump(context: AgentContext, bot_name: str):
+    """Feed queued messages to the agent one at a time, each as a clean fresh turn.
+
+    Runs in the bot's event loop while the agent runs in its own DeferredTask
+    thread, so polling context.is_running() across threads is just a flag read.
+    Submitting only while idle guarantees communicate() starts a fresh turn
+    rather than injecting mid-stream (which is what garbled rapid messages).
+    """
+    import asyncio
+    try:
+        while True:
+            pending = context.data.get(CTX_TG_QUEUE) or []
+            if not pending:
+                break
+            # Wait for the current turn to finish (safety cap ~1h).
+            waited = 0.0
+            while context.is_running():
+                await asyncio.sleep(0.4)
+                waited += 0.4
+                if waited > 3600:
+                    break
+            # Re-read: /stop or /clear may have emptied the queue while we waited.
+            pending = context.data.get(CTX_TG_QUEUE) or []
+            if not pending:
+                break
+            entry = pending.pop(0)
+            instance = get_bot(bot_name)
+            chat_id = context.data.get(CTX_TG_CHAT_ID)
+            if instance and chat_id:
+                context.data[CTX_TG_TYPING_STOP] = _start_typing(instance.bot.token, chat_id)
+            context.data[CTX_TG_REPLY_TO] = entry.get("reply_to")
+            try:
+                mq.log_user_message(
+                    context, entry["user_msg"], entry["attachments"],
+                    message_id=entry["msg_id"], source=" (yatca)",
+                )
+                context.communicate(UserMessage(
+                    message=entry["user_msg"],
+                    attachments=entry["attachments"],
+                    id=entry["msg_id"],
+                ))
+                save_tmp_chat(context)
+            except Exception as e:
+                PrintStyle.error(f"YATCA pump: failed to submit queued message: {format_error(e)}")
+            # Give the new turn a moment to spin up before the next idle-wait.
+            await asyncio.sleep(0.6)
+    finally:
+        context.data[CTX_TG_PUMP_ACTIVE] = False
 
 
 # ---------------------------------------------------------------------------
