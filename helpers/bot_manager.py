@@ -5,6 +5,7 @@ Extended from the A0 plugin pattern with YATCA's full command set.
 """
 
 import asyncio
+import sys
 from dataclasses import dataclass, field
 from typing import Callable, Awaitable
 
@@ -33,13 +34,31 @@ class BotInstance:
     webhook_secret: str = ""
     group_mode: str = "mention"
     bot_info: object | None = None
+    loop: asyncio.AbstractEventLoop | None = None
+    owner_token: object | None = None
 
 
 # ---------------------------------------------------------------------------
 #  Bot registry
 # ---------------------------------------------------------------------------
+#
+# The registry lives on the `sys` module so it survives a re-import of this
+# module. When the plugin is uninstalled+reinstalled to update it, A0 reloads
+# this module with a fresh module-global `_bots = {}`, but the previously
+# started polling task keeps running. A fresh-but-empty registry hides that
+# orphaned poller, so the reconcile starts a SECOND poller on the same token ->
+# TelegramConflictError until a container restart. Anchoring `_bots` to `sys`
+# keeps orphaned bots visible so they can be reaped before a new one starts.
 
-_bots: dict[str, BotInstance] = {}
+_REGISTRY_ATTR = "_yatca_bot_registry"
+_bots: dict[str, "BotInstance"] = getattr(sys, _REGISTRY_ATTR, None)  # type: ignore[assignment]
+if _bots is None:
+    _bots = {}
+    setattr(sys, _REGISTRY_ATTR, _bots)
+
+# Unique per module load. Bots created by an earlier load carry a different
+# token, which lets reap_stale_bots() identify and stop them after a reinstall.
+_MODULE_TOKEN = object()
 
 
 def get_bot(name: str) -> BotInstance | None:
@@ -48,6 +67,27 @@ def get_bot(name: str) -> BotInstance | None:
 
 def get_all_bots() -> dict[str, BotInstance]:
     return _bots
+
+
+async def reap_stale_bots() -> None:
+    """Stop bots started by a previous load of this module.
+
+    Called at the top of the lifecycle reconcile. After an uninstall+reinstall,
+    the old poller is still running but owned by the prior module load; stopping
+    it (clean cancel + session close) before the reconcile starts a fresh bot
+    guarantees a single getUpdates poller per token (no TelegramConflictError).
+    """
+    for name in list(_bots.keys()):
+        inst = _bots.get(name)
+        if inst is not None and getattr(inst, "owner_token", None) is not _MODULE_TOKEN:
+            PrintStyle.info(
+                f"YATCA ({name}): stopping stale poller from a previous plugin load"
+            )
+            try:
+                await stop_bot(name)
+            except Exception as e:
+                PrintStyle.error(f"YATCA ({name}): error reaping stale poller: {format_error(e)}")
+                _bots.pop(name, None)
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +166,14 @@ def create_bot(
 
     dp.include_router(router)
     instance = BotInstance(name=name, bot=bot, dispatcher=dp, router=router, group_mode=group_mode)
+    instance.owner_token = _MODULE_TOKEN
+    try:
+        # The bot's aiohttp session binds to this loop (the job loop the lifecycle
+        # extension runs on). telegram_send runs on a different loop (the agent's),
+        # so it must dispatch sends back onto this one.
+        instance.loop = asyncio.get_running_loop()
+    except RuntimeError:
+        instance.loop = None
     _bots[name] = instance
     return instance
 

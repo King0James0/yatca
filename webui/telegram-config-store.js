@@ -111,26 +111,41 @@ export const store = createStore("yatcaConfig", {
     async testConnection(config, idx) {
         this.testing = idx;
         this.testResults = null;
+        // Toasts are optional polish. The toast module path differs across A0
+        // versions (v1.19 = /components/notifications/notification-store.js,
+        // older = /js/toast.js), so resolve it defensively: a missing/moved
+        // module must never throw and leave the spinner stuck.
+        const toast = async (kind, msg) => {
+            try {
+                const fnName = "toastFrontend" + kind;
+                let fn = null;
+                try {
+                    const n = await import("/components/notifications/notification-store.js");
+                    fn = n[fnName];
+                } catch (_) { /* try window fallback below */ }
+                if (!fn && typeof window !== "undefined") fn = window[fnName];
+                if (fn) fn(msg, "YATCA");
+            } catch (_) { /* toast unavailable - non-fatal */ }
+        };
         try {
             const { callJsonApi } = await import("/js/api.js");
-            const { toastFrontendSuccess, toastFrontendError } = await import("/js/toast.js");
             const res = await callJsonApi(`${API_BASE}/test_connection`, {
                 bot: config.bots[idx],
             });
             this.testResults = res;
             if (res.success !== false && res.ok !== false) {
-                toastFrontendSuccess("YATCA: connection test passed");
+                await toast("Success", "Connection test passed");
             } else {
-                toastFrontendError("YATCA: connection test failed");
+                await toast("Error", "Connection test failed");
             }
         } catch (e) {
-            const { toastFrontendError } = await import("/js/toast.js");
             this.testResults = {
                 success: false,
                 results: [{ test: "Connection", ok: false, message: String(e) }],
             };
-            toastFrontendError("YATCA: connection test error");
+            await toast("Error", "Connection test error");
+        } finally {
+            this.testing = null;
         }
-        this.testing = null;
     },
 });

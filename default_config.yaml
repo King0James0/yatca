@@ -8,6 +8,8 @@ bots: []
 #   webhook_secret: ""           # optional shared secret for webhook verification
 #   allowed_users: []            # Telegram user IDs or @usernames. Empty = allow all.
 #   allowed_chats: []            # Telegram chat IDs. Empty = allow all.
+#   notify_chat_id: ""           # Optional fixed destination for telegram_send. Blank = auto-send to every chat that has messaged the bot.
+#   notify_default: false        # Make this the default bot for telegram_send when no bot is specified.
 #   group_mode: mention          # mention (respond when @mentioned or replied to) | all (respond to every message) | off (ignore groups)
 #   welcome_enabled: false       # Send a greeting when someone joins the group
 #   welcome_message: ""          # Welcome template. Use {name} for the new member's name.

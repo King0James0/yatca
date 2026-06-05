@@ -3,3 +3,8 @@
 memory-bank/*
 memory-bank
 
+dist/
+__pycache__/
+*.pyc
+*.pyo
+

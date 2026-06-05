@@ -217,6 +217,16 @@
 
                 <div class="field">
                   <div class="field-label">
+                    <div class="field-title">Notify Chat ID</div>
+                    <div class="field-description">Optional. A fixed destination for proactive sends (the telegram_send tool). Leave blank and the tool auto-sends to every chat that has messaged the bot — no setup needed. Does NOT restrict who can use the bot.</div>
+                  </div>
+                  <div class="field-control">
+                    <input type="text" x-model="bot.notify_chat_id" placeholder="123456789" />
+                  </div>
+                </div>
+
+                <div class="field">
+                  <div class="field-label">
                     <div class="field-title">Group Mode</div>
                     <div class="field-description">How the bot responds in group chats</div>
                   </div>

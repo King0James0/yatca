@@ -41,6 +41,7 @@ class YatcaBotManager(Extension):
             start_polling,
             setup_webhook,
             stop_bot,
+            reap_stale_bots,
         )
         from usr.plugins.yatca.helpers.handler import (
             handle_start,
@@ -61,6 +62,11 @@ class YatcaBotManager(Extension):
         )
 
         cleanup_old_attachments()
+
+        # Stop any poller left running by a previous load of the plugin
+        # (e.g. after an uninstall+reinstall to update it) before reconciling,
+        # so a fresh poller never collides with an orphan on the same token.
+        await reap_stale_bots()
 
         running = get_all_bots()
 
