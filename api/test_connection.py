@@ -16,10 +16,16 @@ class YatcaTestConnection(ApiHandler):
     async def process(self, input: dict, request: Request) -> dict | Response:
         token = input.get("token", "") or (input.get("bot") or {}).get("token", "")
         if not token:
-            return {"ok": False, "message": "Token is required"}
+            return {
+                "success": False, "ok": False,
+                "results": [{"test": "Connection", "ok": False, "message": "Token is required"}],
+            }
 
         ensure_dependencies()
         from usr.plugins.yatca.helpers.bot_manager import test_token
 
         ok, message = await test_token(token)
-        return {"ok": ok, "message": message}
+        return {
+            "success": ok, "ok": ok,
+            "results": [{"test": "Connection", "ok": ok, "message": message}],
+        }
