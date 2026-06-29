@@ -30,6 +30,31 @@ import subprocess
 from helpers import files
 from helpers.print_style import PrintStyle
 
+# clean_env: least-privilege env for the ffmpeg/ffprobe child (it must NOT inherit A0's runtime secrets).
+# Multi-name shim + inline fallback (identical allowlist) so a missing import can't re-leak or break.
+clean_env = None  # type: ignore[assignment]
+for _se_name in ("usr.plugins.yatca.helpers.secure_env",
+                 "plugins.yatca.helpers.secure_env",
+                 "helpers.secure_env", "secure_env"):
+    try:
+        import importlib
+        clean_env = importlib.import_module(_se_name).clean_env  # type: ignore
+        break
+    except Exception:  # pragma: no cover
+        continue
+if clean_env is None:  # pragma: no cover - import fallback; identical to secure_env.clean_env
+    def clean_env(extra=None, *, allow=(), proxy=True):  # type: ignore[misc]
+        _k = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE",
+              "TZ", "DISPLAY", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME",
+              "XDG_DATA_HOME", "TMPDIR", "TMP", "TEMP"} | set(allow)
+        if proxy:
+            _k |= {"HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "ALL_PROXY", "NO_PROXY",
+                   "http_proxy", "https_proxy", "ftp_proxy", "all_proxy", "no_proxy"}
+        _e = {k: os.environ[k] for k in _k if k in os.environ}
+        if extra:
+            _e.update({k: v for k, v in extra.items() if v is not None})
+        return _e
+
 
 _AUDIO_EXTS = {".ogg", ".oga", ".opus", ".mp3", ".m4a", ".wav", ".flac", ".aac", ".weba"}
 _VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
@@ -146,6 +171,7 @@ def _video_duration(local_path: str) -> float:
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", local_path],
             capture_output=True, timeout=30, text=True,
+            env=clean_env(),  # least-privilege: ffprobe decodes untrusted media, gets no A0 secrets
         )
         return max(0.0, float(out.stdout.strip()))
     except Exception:
@@ -184,6 +210,7 @@ def _extract_video_frames(local_path: str, n: int, duration: float) -> list[str]
                 ["ffmpeg", "-y", "-ss", f"{ts:.3f}", "-i", local_path,
                  "-frames:v", "1", frame_path],
                 capture_output=True, timeout=30,
+                env=clean_env(),  # least-privilege: ffmpeg decodes untrusted media, gets no A0 secrets
             )
             if os.path.isfile(frame_path) and os.path.getsize(frame_path) > 0:
                 paths.append(frame_path)
