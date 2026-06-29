@@ -50,6 +50,7 @@ This repo is structured for the [a0-plugins](https://github.com/agent0ai/a0-plug
 - **Access control** -- per-bot allow-list by user ID, @username, or chat ID
 - **Group support** -- mention, all, or off modes
 - **Typing indicator** -- persistent "typing..." while agent processes
+- **Staged long-task feedback** -- opt-in escalating "still working" messages at configurable thresholds (default 30s / 5min / 30min); stage 3 verifies the task is alive and only reports a timeout if it's actually stuck (never kills a running task)
 - **WebUI config** -- full settings panel in Agent Zero WebUI
 - **Auto dependency install** -- aiogram installed on first use via uv
 - **Multiple bots** -- run as many bots as you need

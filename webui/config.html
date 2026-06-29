@@ -138,6 +138,49 @@
 
                 <div class="field">
                   <div class="field-label">
+                    <div class="field-title">Long-Task Feedback</div>
+                    <div class="field-description">Send staged "still working" messages while a long turn runs. Stage 3 checks if the task is still alive and only reports a timeout if it's actually stuck — the agent is never killed on duration.</div>
+                  </div>
+                  <div class="field-control">
+                    <label class="toggle">
+                      <input type="checkbox" x-model="bot.stage_feedback" />
+                      <span class="toggler"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="field" x-show="bot.stage_feedback">
+                  <div class="field-label">
+                    <div class="field-title">Stage 1 — Working (s)</div>
+                    <div class="field-description">Send "Working on the task provided..." after this many seconds.</div>
+                  </div>
+                  <div class="field-control">
+                    <input type="number" x-model.number="bot.stage1_seconds" min="1" step="1" placeholder="30" />
+                  </div>
+                </div>
+
+                <div class="field" x-show="bot.stage_feedback">
+                  <div class="field-label">
+                    <div class="field-title">Stage 2 — More time (s)</div>
+                    <div class="field-description">Send "Task given requires more time, please wait..." after this many seconds.</div>
+                  </div>
+                  <div class="field-control">
+                    <input type="number" x-model.number="bot.stage2_seconds" min="1" step="1" placeholder="300" />
+                  </div>
+                </div>
+
+                <div class="field" x-show="bot.stage_feedback">
+                  <div class="field-label">
+                    <div class="field-title">Stage 3 — Taking longer (s)</div>
+                    <div class="field-description">Send "Task is taking longer than usual, check back later..." after this many seconds, then verify the task is still alive.</div>
+                  </div>
+                  <div class="field-control">
+                    <input type="number" x-model.number="bot.stage3_seconds" min="1" step="1" placeholder="1800" />
+                  </div>
+                </div>
+
+                <div class="field">
+                  <div class="field-label">
                     <div class="field-title">Bot Name</div>
                     <div class="field-description">Unique identifier for this bot configuration</div>
                   </div>

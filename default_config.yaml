@@ -22,4 +22,8 @@ bots: []
 #   enrich_media: true           # Transcribe voice/audio + extract video frames & document text before sending to the agent (reuses the built-in Whisper STT plugin)
 #   video_frame_interval_s: 5    # Sample one video frame per this many seconds. More = denser sampling. Total frames are capped by the chat model's max_embeds.
 #   queue_messages: true         # When the agent is busy, queue new messages and run them in order instead of interrupting it. Send /stop to cancel the current task and jump ahead.
+#   stage_feedback: false        # Opt-in: send staged "still working" messages while a long turn runs (typing-indicator-style, but with text). Stage 3 checks liveness and only reports a timeout if the turn is actually stuck — the agent is never killed on duration.
+#   stage1_seconds: 30           # Stage 1 threshold — "Working on the task provided..."
+#   stage2_seconds: 300          # Stage 2 threshold (5 min) — "Task given requires more time, please wait..."
+#   stage3_seconds: 1800         # Stage 3 threshold (30 min) — "Task is taking longer than usual, check back later..." then a liveness check.
 #   agent_instructions: ""       # Extra instructions for the agent in Telegram chats

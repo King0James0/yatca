@@ -37,6 +37,7 @@ from helpers.errors import format_error
 from initialize import initialize_agent
 
 from usr.plugins.yatca.helpers import telegram_client as tc
+from usr.plugins.yatca.helpers import stage_feedback as sf
 from usr.plugins.yatca.helpers.bot_manager import get_bot
 from usr.plugins.yatca.helpers.constants import (
     PLUGIN_NAME,
@@ -929,6 +930,8 @@ async def handle_message(message: TgMessage, bot_name: str, bot_cfg: dict):
     context.data[CTX_TG_TYPING_STOP] = typing_stop
     context.data[CTX_TG_REPLY_TO] = reply_to_id
 
+    _start_stage_feedback(instance.bot.token, message.chat.id, context, typing_stop, bot_cfg)
+
     mq.log_user_message(context, user_msg, attachments, message_id=msg_id, source=" (yatca)")
     context.communicate(UserMessage(
         message=user_msg,
@@ -1003,7 +1006,12 @@ async def _pump(context: AgentContext, bot_name: str):
             instance = get_bot(bot_name)
             chat_id = context.data.get(CTX_TG_CHAT_ID)
             if instance and chat_id:
-                context.data[CTX_TG_TYPING_STOP] = _start_typing(instance.bot.token, chat_id)
+                stop_ev = _start_typing(instance.bot.token, chat_id)
+                context.data[CTX_TG_TYPING_STOP] = stop_ev
+                _start_stage_feedback(
+                    instance.bot.token, chat_id, context, stop_ev,
+                    context.data.get(CTX_TG_BOT_CFG, {}),
+                )
             context.data[CTX_TG_REPLY_TO] = entry.get("reply_to")
             try:
                 mq.log_user_message(
@@ -1287,6 +1295,79 @@ def _start_typing(token: str, chat_id: int) -> threading.Event:
 
     threading.Thread(target=_run, daemon=True).start()
     return stop
+
+
+# ---------------------------------------------------------------------------
+#  Staged long-task feedback (opt-in)
+# ---------------------------------------------------------------------------
+#
+# Ported from the prod standalone telegram bot's 3-stage feedback. While a turn
+# runs, tell the user at escalating thresholds that it's still working. The
+# daemon shares the turn's typing-stop Event, so a finished turn (the auto-reply
+# extension sets it) makes the daemon exit silently. Opt-in per bot; thresholds
+# configurable, defaulting to the prod values (30s / 5min / 30min). The staging
+# order + liveness verdict live in helpers/stage_feedback.py (unit-tested).
+
+_STAGE_POLL_SECONDS = 2.0     # how often the daemon wakes to check elapsed/stop
+_STAGE3_GRACE_SECONDS = 5.0   # let the reply path settle before declaring a stall
+
+
+def _start_stage_feedback(token, chat_id, context, stop_event, bot_cfg):
+    """Spawn a daemon that sends staged 'still working' messages while a turn runs.
+
+    No-op unless the per-bot ``stage_feedback`` flag is on. Stages 1 and 2 are
+    plain progress pings. Stage 3 sends a 'taking longer than usual' note, then
+    checks liveness: if the turn is still alive it stays silent; only if the turn
+    is actually dead/stuck (and the auto-reply never fired) does it report a
+    timeout. The agent is never killed on duration.
+    """
+    if not bot_cfg or not bot_cfg.get("stage_feedback", False):
+        return
+
+    t1, t2, t3 = sf.resolve_thresholds(bot_cfg)
+
+    def _run():
+        import asyncio
+
+        async def _loop():
+            start = time.monotonic()
+            sent1 = sent2 = False
+            async with _temp_bot(token) as bot:
+                async def _say(text):
+                    with suppress(Exception):
+                        await tc.send_text(bot, chat_id, text, parse_mode=None)
+
+                while not stop_event.is_set():
+                    elapsed = time.monotonic() - start
+                    stage = sf.due_stage(elapsed, t1, t2, t3, sent1, sent2)
+
+                    if stage == 3:
+                        await _say(sf.STAGE3_MESSAGE)
+                        if not context.is_running():
+                            # Grace: the completion/reply path may be mid-flight
+                            # and about to set stop_event (clean finish).
+                            waited = 0.0
+                            while waited < _STAGE3_GRACE_SECONDS:
+                                if stop_event.is_set():
+                                    return
+                                await asyncio.sleep(0.5)
+                                waited += 0.5
+                            if sf.stage3_timeout_due(context.is_running(), stop_event.is_set()):
+                                await _say(sf.STAGE3_TIMEOUT_MESSAGE)
+                        return  # nothing after stage 3
+                    elif stage == 2:
+                        await _say(sf.STAGE2_MESSAGE)
+                        sent2 = True
+                    elif stage == 1:
+                        await _say(sf.STAGE1_MESSAGE)
+                        sent1 = True
+
+                    await asyncio.sleep(_STAGE_POLL_SECONDS)
+
+        with suppress(Exception):
+            asyncio.run(_loop())
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _format_user(user) -> str:
