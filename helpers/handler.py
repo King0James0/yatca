@@ -1278,10 +1278,15 @@ def _start_typing(token: str, chat_id: int) -> threading.Event:
 
     def _run():
         import asyncio
+        import time as _time
+
+        # Hard lifetime cap: if the stop event is ever stranded (a turn that ends without
+        # a response never sets it), the thread must not ping Telegram forever.
+        deadline = _time.monotonic() + 15 * 60
 
         async def _loop():
             async with _temp_bot(token) as bot:
-                while not stop.is_set():
+                while not stop.is_set() and _time.monotonic() < deadline:
                     await tc.send_typing(bot, chat_id)
                     for _ in range(8):
                         if stop.is_set():

@@ -1,7 +1,7 @@
 name: yatca
 title: "YATCA - Telegram Connector for Agent Zero"
 description: Full-featured Telegram bot bridge for Agent Zero. Send messages, photos, files, voice/audio (transcribed), video (multi-frame + audio), control the agent, switch projects - all from Telegram. Includes a telegram_send tool so agents and scheduled tasks can proactively push messages.
-version: 2.5.0
+version: 2.5.1
 settings_sections:
   - external
 per_project_config: false

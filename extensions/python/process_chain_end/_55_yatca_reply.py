@@ -33,6 +33,12 @@ class YatcaAutoReply(Extension):
 
         response_text = _extract_last_response(context)
         if not response_text:
+            # Still stop the typing indicator: returning here without setting the stop
+            # event strands the 4s sendChatAction thread forever (no later turn pops it).
+            typing_stop = context.data.pop(CTX_TG_TYPING_STOP, None)
+            if typing_stop:
+                typing_stop.set()
+            context.data.pop(CTX_TG_REPLY_TO, None)
             return
 
         attachments = context.data.pop(CTX_TG_ATTACHMENTS, [])
